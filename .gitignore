@@ -3,3 +3,7 @@ campos_extraidos.jsonl
 campos_extraidos.jsonl
 extrae_campos_ss.py
 separar_tipos.py
+actas_descargadas/
+actas_filtradas/
+embeddings.index
+faiss_documents.json
