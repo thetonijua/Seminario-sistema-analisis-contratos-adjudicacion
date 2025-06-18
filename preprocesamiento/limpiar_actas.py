@@ -1,11 +1,7 @@
 import re
 import string
-import nltk
-from nltk.corpus import stopwords
 import json
 
-# Descargar las stopwords
-nltk.download('stopwords')
 
 # Función para limpiar el texto
 import re
