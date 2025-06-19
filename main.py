@@ -1,17 +1,37 @@
 # main.py
+
 """
-Sistema de detección de riesgos legales en actas de adjudicación usando RAG y LLM
-Desarrollado como prototipo funcional para el informe final del primer semestre.
+Sistema de Análisis de Riesgos Legales en Actas de Adjudicación
+---------------------------------------------------------------
+Este script ejecuta una consulta iterativa utilizando embeddings semánticos,
+FAISS y el modelo GPT-3.5 para detectar posibles riesgos legales en documentos
+de adjudicación del sistema chileno de compras públicas.
 """
 
-from modules.iterative_development import iterative_search_and_evaluation
+from modulos import iterative_search_and_evaluation
 
-# Consulta inicial a evaluar
-consulta = "¿Este documento si menciona las leyes actuales sobre licitaciones, tiene leyes desactualizadas o falta información que podría ser indicio de riesgo?"
+# ================================
+# CONFIGURACIÓN DE LA CONSULTA
+# ================================
 
-print("🧠 Iniciando análisis iterativo sobre actas con LLM...")
-respuesta = iterative_search_and_evaluation(consulta)
+consulta_inicial = (
+    "¿Este documento menciona correctamente las leyes actuales sobre licitaciones? "
+    "¿Faltan normas importantes o hay indicios de posibles irregularidades legales? Como falta de información"
+)
+
+# ================================
+# EJECUCIÓN DEL ANÁLISIS
+# ================================
+
+print("🧠 Iniciando análisis legal iterativo con LLM...\n")
+respuesta_final = iterative_search_and_evaluation(consulta_inicial)
+
+# ================================
+# RESULTADO
+# ================================
 
 print("\n✅ Análisis completo.")
-print("📄 Respuesta final:")
-print(respuesta)
+print("📄 Respuesta final del modelo:")
+print("-----------------------------------")
+print(respuesta_final)
+
