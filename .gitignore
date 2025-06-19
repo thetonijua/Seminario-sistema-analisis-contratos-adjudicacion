@@ -1,5 +1,5 @@
 myenv/
-openai.env
+.env
 campos_extraidos.jsonl
 campos_extraidos.jsonl
 extrae_campos_ss.py
@@ -8,3 +8,4 @@ actas_descargadas/
 actas_filtradas/
 embeddings.index
 faiss_documents.json
+__pycache__/
