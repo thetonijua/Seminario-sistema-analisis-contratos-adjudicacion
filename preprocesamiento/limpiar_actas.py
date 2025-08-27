@@ -18,7 +18,7 @@ def clean_text(text):
 
     # 2. Eliminar caracteres extraños no alfanuméricos, excepto letras con tildes, números y guiones
     # Usamos una expresión regular que permita letras con tildes y la ñ
-    text = re.sub(r'[^\w\sáéíóúÁÉÍÓÚñÑ-]', ' ', text)  # Permitir letras con tildes y la ñ, y guiones
+    text = re.sub(r'[^\w\sáéíóúÁÉÍÓÚñÑ.,-]', ' ', text)  # Permitir letras con tildes y la ñ, y guiones
 
     # 3. Eliminar guiones sueltos (no conectados a letras o números)
     text = re.sub(r'(?<!\w)-|-(?!\w)', ' ', text)  # Eliminar guiones sueltos, pero mantener guiones con letras/números
@@ -52,8 +52,8 @@ def clean_text(text):
     return text
 
 # Leer el archivo JSONL y procesarlo
-input_file = 'actas_extraidas.jsonl'
-output_file = 'actas_limpias.jsonl'
+input_file = 'preprocesamiento/actas_extraidas.jsonl'
+output_file = 'preprocesamiento/actas_limpias.jsonl'
 
 processed_data = []
 
