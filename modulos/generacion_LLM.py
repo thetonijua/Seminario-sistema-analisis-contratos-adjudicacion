@@ -4,9 +4,12 @@ import json
 # Establece tu clave API de OpenAI
 openai.api_key = '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'  # Sustituye con tu clave real
 
+
+
+
 # Cargar el mapeo de FAISS a documentos desde el archivo JSON
 try:
-    with open('faiss_documents.json', 'r', encoding='utf-8') as infile:
+    with open('modulos/faiss_documents.json', 'r', encoding='utf-8') as infile:
         faiss_documents = json.load(infile)
     print("Archivo 'faiss_documents.json' cargado correctamente.")
 except Exception as e:
@@ -31,6 +34,8 @@ def generate_response_with_gpt35(query, faiss_results):
 
     return response.choices[0].message['content'].strip()
 
+
+
 # Los índices devueltos por la consulta semántica de FAISS
 faiss_indices = [360]  # Los índices devueltos por FAISS
 faiss_results = []  # Aquí almacenamos los resultados recuperados de los índices FAISS
@@ -38,6 +43,7 @@ faiss_results = []  # Aquí almacenamos los resultados recuperados de los índic
 # Verificar el número total de chunks generados
 total_chunks = len(faiss_documents)  # Los chunks deben estar en faiss_documents.json
 #print(f"Total de chunks generados: {total_chunks}")
+
 
 # Buscar los resultados en FAISS y recuperar los documentos correspondientes
 for idx in faiss_indices:
@@ -49,9 +55,15 @@ for idx in faiss_indices:
     else:
         print(f"Índice {idx} fuera del rango de los chunks generados.")
 
+
+
+
 # Usar GPT-3.5 para generar una respuesta enriquecida con la información recuperada
 query = "Falta informacion importante en este documento de decreto que debiesen de tener en cuenta resoluciones de adjudicación?"  # La consulta que se va a enviar a GPT-3.5
 response = generate_response_with_gpt35(query, faiss_results)
+
+
+
 
 # Mostrar la respuesta generada
 print(f"Respuesta generada por GPT-3.5:\n{response}")
