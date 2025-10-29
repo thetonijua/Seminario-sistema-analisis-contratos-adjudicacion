@@ -9,3 +9,4 @@ actas_filtradas/
 embeddings.index
 faiss_documents.json
 __pycache__/
+*.pdf
