@@ -5,11 +5,13 @@ from sentence_transformers import SentenceTransformer
 from dotenv import load_dotenv
 import openai
 import random
+import unicodedata
+import hashlib
 
 
 # ===== config =====
 MODEL_EMB = "paraphrase-mpnet-base-v2"
-MODEL_LLM = "gpt-3.5-turbo"
+MODEL_LLM = "gpt-4.1"
 CATALOGO = [
     "MS.Vistos",
     "MS.Considerando",
@@ -39,6 +41,32 @@ def pick_text(rec: dict) -> str:
     txt = rec.get("texto_limpio", "")
     return txt if isinstance(txt, str) else ""
 
+def normalize_labels(parsed: dict) -> dict:
+    if not isinstance(parsed, dict) or "riesgos" not in parsed:
+        return parsed
+    map_labels = {
+        "MS.Bases": "MR.Bases",
+        "MR.Ley19.886": "MR.Ley19886",
+        "MR.Ley 19.886": "MR.Ley19886",
+        "MR. Ley19886": "MR.Ley19886",
+        "MR.Ley 19886": "MR.Ley19886",
+        "MR.19886": "MR.Ley19886",
+    }
+    catalog = set([
+        "MS.Vistos","MS.Considerando","MR.Bases","MR.Ley19886","MR.Ley18695",
+        "ID.Incorrecto","FMT.TituloID","VAL.Monto","DESC.Servicio"
+    ])
+    nuevos = []
+    for r in parsed.get("riesgos", []):
+        t = r.get("tipo")
+        if t in map_labels:
+            t = map_labels[t]
+            r["tipo"] = t
+        if t in catalog:
+            nuevos.append(r)
+        # si sigue fuera de catálogo, lo descartamos
+    parsed["riesgos"] = nuevos
+    return parsed
 
 
 def normalize_base_name(rec: dict) -> str:
@@ -161,12 +189,22 @@ def call_critic(doc_block: str, analyst_json: str, api_key: str) -> str:
     )
     return resp.choices[0].message.content.strip()
 
-def mk_doc_id_from_filename(filename: str) -> str:
+def mk_doc_id_from_filename(fname: str) -> str:
     """doc_id estable a partir del nombre de archivo (sin extensión)."""
-    base = Path(filename).stem if filename else "doc"
-    base = re.sub(r"[^\w\-]+", "_", base, flags=re.UNICODE)
-    base = re.sub(r"_+", "_", base).strip("_")
-    return base or "doc"
+    if not fname:
+        return "doc_" + hashlib.md5(b"").hexdigest()[:8]
+
+    # Normaliza a NFC para consistencia, conserva acentos y ‘°/º’
+    s = unicodedata.normalize("NFC", fname)
+    s = s.replace(" ", "_")
+
+    # Permitidos: letras/dígitos/_-.() y caracteres latinos con tilde, además de ° y º y ‘N’
+    s = re.sub(r"[^A-Za-z0-9_\-\.()ÁÉÍÓÚáéíóúÑñÜü°ºN°]", "", s)
+
+    # Evita doc_id vacío
+    if not s:
+        s = "doc_" + hashlib.md5(fname.encode("utf-8", errors="ignore")).hexdigest()[:8]
+    return s
 
 def collect_risk_types(parsed: dict) -> list:
     tipos = []
@@ -280,9 +318,7 @@ def apply_consistency_guards(res_text: str, parsed: dict, verbose: bool = True) 
         if tipo == "ID.Incorrecto" and _has(text, pat_id_ok):
             dropped.append("ID.Incorrecto removido: hay un ID con formato válido.")
             continue
-        if tipo == "MR.Bases" and _has(text, pat_bases):
-            dropped.append("MR.Bases removido: se mencionan Bases (Administrativas/Técnicas/Licitación).")
-            continue
+
 
         # FMT.TituloID y DESC.Servicio quedan sin filtro automático (son más contextuales)
         keep.append(r)
@@ -311,7 +347,7 @@ def parse_args():
     ap.add_argument("--doc_id", help="Si tu JSONL tuviera 'doc_id' y quieres filtrar por él")
     ap.add_argument("--index", default="modulos/embedding-corpus/gold.index", help="Índice FAISS del gold")
     ap.add_argument("--mapping", default="modulos/embedding-corpus/gold_mapping.jsonl", help="Mapping del gold")
-    ap.add_argument("--tpl", default="modulos/llm/prompt_template.txt")
+    ap.add_argument("--tpl", default="modulos/llm/prompt_templatev2.txt")
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--outdir", default="outputs")
     ap.add_argument("--index_pos", type=int, help="si hay varias coincidencias, escoger por índice (0-based)")
@@ -323,6 +359,8 @@ def parse_args():
     ap.add_argument("--pool_dedup", action="store_true", help="Evita duplicados por doc_id en el pool_jsonl")
     ap.add_argument("--random", action="store_true", help="Si se indica, selecciona al azar en vez de usar --match")
     ap.add_argument("--n_random", type=int, default=1, help="Número de documentos aleatorios a procesar si se usa --random")
+    ap.add_argument("--allow_on_critic_fail", action="store_true",help="Permite guardar en el pool aunque el Crítico marque ok=false")
+
 
 
 
@@ -349,16 +387,8 @@ def main():
         raise SystemExit("Falta OPENAI_API_KEY (define en .env)")
 
     args = parse_args()
-    k_current = max(0, args.k)
-    rag_enabled = (k_current > 0)
-
-    # Seguimiento de acciones repetidas
-    last_action = None
-    same_action_streak = 0
-
+    # planner prompt (una vez)
     planner_sys = Path("modulos/llm/planner_prompt.txt").read_text(encoding="utf-8")
-
-
 
     print("[INFO] Cargando JSONL:", args.jsonl)
 
@@ -397,15 +427,20 @@ def main():
     gold_map = load_mapping(args.mapping)
     emb_model = SentenceTransformer(MODEL_EMB)
 
-    planner_sys = Path("modulos/llm/planner_prompt.txt").read_text(encoding="utf-8")
-
-
     procesados_ok = 0
 
     for idx, rec in enumerate(cands, start=1):
         print("\n===============================")
         print(f"[INFO] Documento {idx}/{len(cands)}: {rec.get('archivo')}")
         print("===============================\n")
+
+        # Reiniciar control de acciones por documento
+        last_action = None
+        same_action_streak = 0
+
+        # k/rag por documento (desde CLI)
+        k_current = max(0, args.k)
+        rag_enabled = (k_current > 0)
 
         # --- TEXTO ---
         res_text = pick_text(rec)
@@ -427,13 +462,11 @@ def main():
 
         max_steps, step = 4, 0
         final_json = None
+        critic = {}  # para que exista aunque falle antes
 
-
-    # BUCLE AGENTIC 
         # ===== BUCLE AGENTIC =====
         while step < max_steps:
             step += 1
-
             print(f"[PLAN] step={step} solicitando plan...")
 
             plan_raw = run_planner(planner_sys, scratch, api_key)
@@ -443,15 +476,15 @@ def main():
                 plan = {"thought":"fallback eval","action":"EVAL_RISKS","args":{}}
             print("[PLAN] Respuesta planner:", plan)
 
-            action = plan.get("action")
-            args_a = plan.get("args", {})
+            action = (plan.get("action") or "").upper()
+            args_a = plan.get("args", {}) or {}
 
-             # ===  Intercepción antes del manejo de acciones ===
+            # Intercepción: si planner pide RETRIEVE_GOLD pero RAG está OFF, forzar eval
             if action == "RETRIEVE_GOLD" and not rag_enabled:
                 print("[PLAN] Planner pidió RETRIEVE_GOLD pero RAG está desactivado → forzando EVAL_RISKS.")
                 action, args_a = "EVAL_RISKS", {}
 
-            # ===  Failsafe: si repite acción muchas veces, forzamos avance ===
+            # Failsafe: si repite acción demasiadas veces, forzamos EVAL_RISKS
             if action == last_action:
                 same_action_streak += 1
             else:
@@ -461,35 +494,45 @@ def main():
                 print("[PLAN] Acción repetida demasiadas veces → forzando EVAL_RISKS.")
                 action, args_a = "EVAL_RISKS", {}
 
+            # si ya hay precedentes y el planner vuelve a pedir RETRIEVE_GOLD, evalúar ya
+            if action == "RETRIEVE_GOLD" and scratch.get("precedentes") and rag_enabled:
+                print("[PLAN] Ya hay precedentes → saltando a EVAL_RISKS.")
+                action, args_a = "EVAL_RISKS", {}
 
-             # ===  ACCIONES ===
-            if action == "RETRIEVE_GOLD" and not rag_enabled:
-                
-                k_req = max(0, int(args_a.get("k", k_current)))
-                # fuerza coincidencia con k_current
+
+            # === ACCIONES ===
+            if action == "RETRIEVE_GOLD":
+                # respetar rag_enabled y k_current
+                k_req = int(args_a.get("k", k_current))
+                # alinear con runtime
                 if k_req != k_current:
                     print(f"[ACT] Ajustando k del planner de {k_req} → {k_current} (valor runtime).")
                     k_req = k_current
 
-                if k_req <= 0:
-                    print("[ACT] RETRIEVE_GOLD → k=0 (sin recuperación).")
+                if not rag_enabled or k_req <= 0:
+                    print("[ACT] RETRIEVE_GOLD → k=0 / RAG OFF (sin recuperación).")
                     scratch["precedentes"] = []
                     k_current = 0
+                    scratch["k_current"] = k_current
                     continue
 
                 print(f"[ACT] RETRIEVE_GOLD k={k_req} → buscando precedentes...")
-                emb_model = SentenceTransformer(MODEL_EMB)
                 q = emb_model.encode([res_text], convert_to_numpy=True, normalize_embeddings=True)
                 D, I = index.search(q, k_req)
                 precs = [gold_map[i] for i in I[0]]
                 scratch["precedentes"] = precs
                 print("[ACT] Precedentes recuperados:", len(precs))
                 k_current = k_req
+                scratch["k_current"] = k_current
                 continue
 
             if action == "ADJUST_K":
-                k_current = int(args_a.get("k", min(10, max(5, k_current+3))))
-                print("[ACT] ADJUST_K → k_current:", k_current)
+                # subir/bajar k respetando límites razonables
+                k_current = int(args_a.get("k", min(10, max(0, k_current+3))))
+                rag_enabled = (k_current > 0)
+                scratch["k_current"] = k_current
+                scratch["rag_enabled"] = rag_enabled
+                print("[ACT] ADJUST_K → k_current:", k_current, "| rag_enabled:", rag_enabled)
                 continue
 
             if action == "EVAL_RISKS":
@@ -511,17 +554,16 @@ def main():
                     final_json = raw
                     break
                 else:
+                    # Un intento de reparación
                     feedback = json.dumps(critic, ensure_ascii=False)
                     repair_prompt = prompt + "\n\n[REVISION_DEL_AUDITOR]\n" + feedback + \
                                     "\nCorrige tu JSON: ajusta/añade citas literales o elimina riesgos sin evidencia. Devuelve SOLO JSON."
                     raw2 = call_llm(repair_prompt, api_key)
-
                     critic_out2 = call_critic(doc_block=res_text, analyst_json=raw2, api_key=api_key)
                     try:
                         ok2 = json.loads(critic_out2).get("ok", False)
                     except json.JSONDecodeError:
                         ok2 = False
-
                     final_json = raw2 if ok2 else raw
                     break
 
@@ -536,10 +578,9 @@ def main():
             prompt = build_prompt(Path(args.tpl), base_doc_block, precedentes)
             final_json = call_llm(prompt, api_key)
 
-        # Parseo final
         try:
             parsed = json.loads(final_json)
-            # Cinturón anti-FP (remueve riesgos incoherentes con el propio documento)
+            parsed = normalize_labels(parsed)
             parsed = apply_consistency_guards(res_text, parsed, verbose=True)
         except json.JSONDecodeError:
             print("[ERROR] Salida no-JSON; se omite este documento.")
@@ -547,28 +588,29 @@ def main():
 
         # ---------- GUARDADO EN POOL JSONL ----------
         if args.pool_jsonl:
-            orig_filename = rec.get("archivo")
-            if orig_filename and "." not in Path(orig_filename).name:
-                orig_filename = str(Path(orig_filename).with_suffix(".pdf"))
+            orig_filename = rec.get("archivo") or rec.get("filename")
             if not orig_filename:
-                orig_filename = normalize_base_name(rec) + ".pdf"
+                orig_filename = "desconocido.pdf"
 
-             # Normaliza a forward slashes
+            # Normaliza a forward slashes
             filepath = str(Path(args.pool_data_root) / orig_filename).replace("\\", "/")
 
+            doc_id_in = rec.get("doc_id")
+            if not doc_id_in:
+                base_name = Path(orig_filename).stem
+                doc_id_in = mk_doc_id_from_filename(base_name)
+            else:
+                doc_id_in = str(doc_id_in).replace(".pdf", "").replace(".doc", "").strip()
             pool_item = {
-                "doc_id": mk_doc_id_from_filename(orig_filename),
-                "filename": orig_filename,
-                "filepath": filepath,
+                "doc_id": doc_id_in ,
+                "filename": rec.get("filename") or orig_filename,   # conserva símbolos
+                "filepath": filepath,                                # sólo slashes
                 "riesgos": collect_risk_types(parsed),
                 "evidencias": collect_evidencias(parsed),
-                "nota_curador": build_nota_curador(parsed)
+                "nota_curador": build_nota_curador(parsed),
             }
 
-
-            # Asegura que critic_ok_flag exista (si no fue seteado antes, asume False)
-            critic_ok_flag = bool(locals().get("critic", {}).get("ok", False))
-
+            critic_ok_flag = bool(critic.get("ok", False))
             if not critic_ok_flag and not getattr(args, "allow_on_critic_fail", False):
                 print("[POOL] Omitido: el Crítico no validó (ok=false). Usa --allow_on_critic_fail para forzar.")
                 continue

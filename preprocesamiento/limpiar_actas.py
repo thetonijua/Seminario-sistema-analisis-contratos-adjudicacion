@@ -52,8 +52,8 @@ def clean_text(text):
     return text
 
 # Leer el archivo JSONL y procesarlo
-input_file = 'preprocesamiento/actas_extraidas.jsonl'
-output_file = 'preprocesamiento/actas_limpias.jsonl'
+input_file = 'actas_extraidasv2.jsonl'
+output_file = 'actas_limpiasv2.jsonl'
 
 processed_data = []
 
