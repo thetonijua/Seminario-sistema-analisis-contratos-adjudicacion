@@ -11,7 +11,7 @@ import hashlib
 
 # ===== config =====
 MODEL_EMB = "paraphrase-mpnet-base-v2"
-MODEL_LLM = "gpt-4.1"
+MODEL_LLM = "gpt-3.5-turbo"
 CATALOGO = [
     "MS.Vistos",
     "MS.Considerando",
@@ -33,7 +33,6 @@ def load_mapping(path):
             if line:
                 mapping.append(json.loads(line))
     return mapping
-
 
 
 def pick_text(rec: dict) -> str:
@@ -347,7 +346,7 @@ def parse_args():
     ap.add_argument("--doc_id", help="Si tu JSONL tuviera 'doc_id' y quieres filtrar por él")
     ap.add_argument("--index", default="modulos/embedding-corpus/gold.index", help="Índice FAISS del gold")
     ap.add_argument("--mapping", default="modulos/embedding-corpus/gold_mapping.jsonl", help="Mapping del gold")
-    ap.add_argument("--tpl", default="modulos/llm/prompt_templatev2.txt")
+    ap.add_argument("--tpl", default="modulos/llm/prompt_template.txt")
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--outdir", default="outputs")
     ap.add_argument("--index_pos", type=int, help="si hay varias coincidencias, escoger por índice (0-based)")
