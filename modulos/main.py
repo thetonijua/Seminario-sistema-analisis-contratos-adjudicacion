@@ -353,7 +353,7 @@ def parse_args():
     ap.add_argument("--dump_docblock", help="Ruta para guardar el DOCUMENTO_BASE que se envía al LLM (ventanas + pistas)")
     ap.add_argument("--dump_prompt", help="Ruta para guardar el prompt completo enviado al Analista")
     ap.add_argument("--fulltext", action="store_true", help="Pasa el texto completo al LLM en lugar de ventanas")
-    ap.add_argument("--pool_jsonl", help="Si se entrega, se hace append de cada salida en formato metadata a este JSONL")
+    ap.add_argument("--pool_jsonl", default="outputs/pool_candidates.jsonl" help="Si se entrega, se hace append de cada salida en formato metadata a este JSONL")
     ap.add_argument("--pool_data_root", default="data", help="Prefijo para filepath en el pool (por defecto 'data')")
     ap.add_argument("--pool_dedup", action="store_true", help="Evita duplicados por doc_id en el pool_jsonl")
     ap.add_argument("--random", action="store_true", help="Si se indica, selecciona al azar en vez de usar --match")
